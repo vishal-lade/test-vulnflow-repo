@@ -112,12 +112,14 @@ jobs:
           docker run -t --rm \
             -v "${{ github.workspace }}:/repo" \
             -e PYTHONUNBUFFERED=1 \
+            -e VULNFLOW_REPORTS_DIR="/repo/.vulnflow/reports" \
+            -e VULNFLOW_AUDIT_DIR="/repo/.vulnflow/audit" \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
             -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
             -e LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}" \
             "${{ env.IMAGE }}" \
-            scan --repo /repo --mode "${{ env.MODE }}" ${{ env.FLAGS }}
+            scan --repo /repo --output /repo/.vulnflow/reports/report.md --mode "${{ env.MODE }}" ${{ env.FLAGS }}
           
           EXIT_CODE=$?
           set -e
