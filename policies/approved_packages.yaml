@@ -1,0 +1,56 @@
+# policies/approved_packages.yaml
+# Approved package names, allowed version ranges, and governance policies for VulnFlow.
+
+packages:
+  # --- Node.js (npm) Ecosystem ---
+  - name: lodash
+    ecosystem: npm
+    approved_versions: ">=4.17.21"
+    status: approved
+  - name: express
+    ecosystem: npm
+    approved_versions: ">=4.19.2"
+    status: approved
+  - name: axios
+    ecosystem: npm
+    approved_versions: ">=1.7.4"
+    status: approved
+  - name: moment
+    ecosystem: npm
+    status: deprecated
+    replacement: date-fns
+    reason: "Upstream deprecated in favor of modular date libraries"
+  - name: left-pad
+    ecosystem: npm
+    status: banned
+    reason: "Unmaintained and obsolete utility package"
+
+  # --- Python (PyPI) Ecosystem ---
+  - name: urllib3
+    ecosystem: pypi
+    approved_versions: ">=2.0.0"
+    status: approved
+  - name: requests
+    ecosystem: pypi
+    approved_versions: ">=2.32.0"
+    status: approved
+  - name: flask
+    ecosystem: pypi
+    approved_versions: ">=2.3.0"
+    status: approved
+
+# Governance rules
+rules:
+  # When unknown packages or unvetted versions are discovered, VulnFlow halts execution
+  # with Exit Code 10 (Human Security Approval Required) and saves state to .vulnflow/pending_state.json
+  unknown_package: require_approval
+  apply_to_transitive: true
+  licenses_denied:
+    - GPL-3.0
+    - AGPL-3.0
+  licenses_allowed:
+    - MIT
+    - Apache-2.0
+    - BSD-3-Clause
+    - BSD-2-Clause
+    - ISC

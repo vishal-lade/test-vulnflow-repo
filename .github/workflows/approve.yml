@@ -1,0 +1,123 @@
+name: VulnFlow Approval Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_id:
+        description: 'Plan ID to authorize or reject (e.g. PLAN-ebaaef6720e2)'
+        required: true
+        type: string
+      action:
+        description: 'Governance decision'
+        required: true
+        default: 'approve'
+        type: choice
+        options:
+          - approve
+          - reject
+      reason:
+        description: 'Reviewer rationale / justification'
+        required: false
+        default: 'Approved for deployment by security reviewer'
+        type: string
+      resume:
+        description: 'Automatically resume workflow and open Pull Request upon approval'
+        required: false
+        default: true
+        type: boolean
+      image:
+        description: 'VulnFlow container image tag (GHCR)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  packages: read
+
+jobs:
+  approve-and-resume:
+    name: Authorize Remediation Plan
+    runs-on: ubuntu-latest
+
+    env:
+      DEFAULT_IMAGE: "ghcr.io/lade6501/vulnflow:latest"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Image
+        run: |
+          if [ -n "${{ github.event.inputs.image }}" ]; then
+            IMG="${{ github.event.inputs.image }}"
+          elif [ -n "${{ vars.VULNFLOW_IMAGE }}" ]; then
+            IMG="${{ vars.VULNFLOW_IMAGE }}"
+          else
+            IMG="$DEFAULT_IMAGE"
+          fi
+          echo "IMAGE=$IMG" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull VulnFlow Container
+        run: |
+          docker pull "${{ env.IMAGE }}"
+
+      - name: Process Plan Approval / Rejection
+        run: |
+          PLAN_ID="${{ github.event.inputs.plan_id }}"
+          ACTION="${{ github.event.inputs.action }}"
+          REASON="${{ github.event.inputs.reason }}"
+          REVIEWER="${{ github.actor }}"
+
+          echo "=========================================================="
+          echo "Processing VulnFlow Governance Gate"
+          echo "Plan ID:  $PLAN_ID"
+          echo "Action:   $ACTION"
+          echo "Reviewer: $REVIEWER"
+          echo "Reason:   $REASON"
+          echo "=========================================================="
+
+          ARGS="approve --plan-id $PLAN_ID --repo /repo --reviewer $REVIEWER --reason \"$REASON\""
+
+          if [ "$ACTION" = "reject" ]; then
+            ARGS="$ARGS --reject"
+          elif [ "${{ github.event.inputs.resume }}" = "true" ]; then
+            ARGS="$ARGS --resume"
+          fi
+
+          echo "Executing: vulnflow $ARGS"
+
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
+            -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
+            "${{ env.IMAGE }}" \
+            $ARGS
+
+      - name: Push Remediation Branch to Remote
+        if: github.event.inputs.action == 'approve' && github.event.inputs.resume == 'true'
+        run: |
+          # Push any newly created remediation branch to origin so PR is accessible
+          git push origin --all || true
+
+      - name: Publish Summary
+        if: always()
+        run: |
+          echo "### 🛡️ VulnFlow Governance Decision" >> $GITHUB_STEP_SUMMARY
+          echo "- **Plan ID**: \`${{ github.event.inputs.plan_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Decision**: \`${{ github.event.inputs.action }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reviewer**: \`${{ github.actor }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY

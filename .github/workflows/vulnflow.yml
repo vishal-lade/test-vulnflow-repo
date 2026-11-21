@@ -17,7 +17,7 @@ on:
           - pr
           - dry-run
       auto_approve:
-        description: 'Auto-approve review-tier plans (Major bumps, secrets, unvetted packages)'
+        description: 'Auto-approve review-tier plans (bypass approval pause)'
         required: false
         default: false
         type: boolean
@@ -89,7 +89,6 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          # Use GITHUB_TOKEN or a custom GHCR_PAT secret if the package is in a different GitHub account/org
           password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
@@ -109,6 +108,7 @@ jobs:
           echo "Flags: ${{ env.FLAGS }}"
           echo "=========================================================="
 
+          set +e
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
@@ -117,6 +117,21 @@ jobs:
             -e LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}" \
             "${{ env.IMAGE }}" \
             scan --repo /repo --mode "${{ env.MODE }}" ${{ env.FLAGS }}
+          
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "VulnFlow executed successfully."
+          elif [ $EXIT_CODE -eq 10 ]; then
+            echo "::warning::⚡ Human Security Approval Required (Exit Code 10). One or more plans paused for authorization."
+            echo "::notice::Check the step summary or report below for Plan IDs, then trigger the 'VulnFlow Approval Workflow' to authorize."
+          elif [ $EXIT_CODE -eq 20 ]; then
+            echo "::warning::✖ Policy Safety Gate Blocked Execution (Exit Code 20). Package banned or denied by policies/approved_packages.yaml."
+          else
+            echo "::error::VulnFlow exited with unexpected code: $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
 
       - name: Publish Summary to GitHub Actions Job
         if: always()
