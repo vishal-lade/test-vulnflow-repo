@@ -10,11 +10,11 @@ on:
       mode:
         description: 'VulnFlow execution mode'
         required: true
-        default: 'report'
+        default: 'pr'
         type: choice
         options:
-          - report
           - pr
+          - report
           - dry-run
       auto_approve:
         description: 'Auto-approve review-tier plans (bypass approval pause)'
@@ -68,7 +68,7 @@ jobs:
           echo "Selected VulnFlow container image: $IMG"
 
           # Determine mode
-          MODE="${{ github.event.inputs.mode || 'report' }}"
+          MODE="${{ github.event.inputs.mode || 'pr' }}"
           echo "MODE=$MODE" >> $GITHUB_ENV
 
           # Construct additional CLI flags
@@ -109,8 +109,9 @@ jobs:
           echo "=========================================================="
 
           set +e
-          docker run --rm \
+          docker run -t --rm \
             -v "${{ github.workspace }}:/repo" \
+            -e PYTHONUNBUFFERED=1 \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
             -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
