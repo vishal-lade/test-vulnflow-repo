@@ -1,0 +1,15 @@
+# Environment and dependencies
+.venv/
+env/
+venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# VulnFlow runtime and audit directories
+.vulnflow/
+
+# OS and IDE files
+.DS_Store
+.idea/
+.vscode/

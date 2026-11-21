@@ -1,0 +1,140 @@
+name: VulnFlow Autonomous Security Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'VulnFlow execution mode'
+        required: true
+        default: 'report'
+        type: choice
+        options:
+          - report
+          - pr
+          - dry-run
+      auto_approve:
+        description: 'Auto-approve review-tier plans (Major bumps, secrets, unvetted packages)'
+        required: false
+        default: false
+        type: boolean
+      no_llm:
+        description: 'Force fast offline deterministic planner (bypass remote LLM)'
+        required: false
+        default: false
+        type: boolean
+      image:
+        description: 'Custom VulnFlow container image tag (GHCR)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  packages: read
+
+jobs:
+  vulnflow-remediation:
+    name: Scan & Remediate with VulnFlow
+    runs-on: ubuntu-latest
+
+    env:
+      # Default GHCR container image; can be overridden via workflow_dispatch input or repository variable
+      DEFAULT_IMAGE: "ghcr.io/lade6501/vulnflow:latest"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Image & Flags
+        id: config
+        run: |
+          # Determine target Docker image
+          if [ -n "${{ github.event.inputs.image }}" ]; then
+            IMG="${{ github.event.inputs.image }}"
+          elif [ -n "${{ vars.VULNFLOW_IMAGE }}" ]; then
+            IMG="${{ vars.VULNFLOW_IMAGE }}"
+          else
+            IMG="$DEFAULT_IMAGE"
+          fi
+          echo "IMAGE=$IMG" >> $GITHUB_ENV
+          echo "Selected VulnFlow container image: $IMG"
+
+          # Determine mode
+          MODE="${{ github.event.inputs.mode || 'report' }}"
+          echo "MODE=$MODE" >> $GITHUB_ENV
+
+          # Construct additional CLI flags
+          FLAGS=""
+          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
+            FLAGS="$FLAGS --auto-approve"
+          fi
+          if [ "${{ github.event.inputs.no_llm }}" = "true" ]; then
+            FLAGS="$FLAGS --no-llm"
+          elif [ -z "${{ secrets.NVIDIA_API_KEY }}" ]; then
+            echo "Notice: NVIDIA_API_KEY secret not found; falling back to deterministic planner (--no-llm)"
+            FLAGS="$FLAGS --no-llm"
+          fi
+          echo "FLAGS=$FLAGS" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # Use GITHUB_TOKEN or a custom GHCR_PAT secret if the package is in a different GitHub account/org
+          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull VulnFlow Container
+        run: |
+          echo "Pulling container: ${{ env.IMAGE }}"
+          docker pull "${{ env.IMAGE }}"
+
+      - name: Run VulnFlow (Autonomous Scan & Remediation)
+        id: vulnflow_run
+        run: |
+          mkdir -p .vulnflow/reports .vulnflow/audit
+          echo "=========================================================="
+          echo "Executing VulnFlow Container against Repository"
+          echo "Image: ${{ env.IMAGE }}"
+          echo "Mode:  ${{ env.MODE }}"
+          echo "Flags: ${{ env.FLAGS }}"
+          echo "=========================================================="
+
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo" \
+            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
+            -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
+            -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
+            -e LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}" \
+            "${{ env.IMAGE }}" \
+            scan --repo /repo --mode "${{ env.MODE }}" ${{ env.FLAGS }}
+
+      - name: Publish Summary to GitHub Actions Job
+        if: always()
+        run: |
+          if [ -d .vulnflow/reports ]; then
+            LATEST_REPORT=$(ls -t .vulnflow/reports/*.md 2>/dev/null | head -n 1)
+            if [ -n "$LATEST_REPORT" ] && [ -s "$LATEST_REPORT" ]; then
+              echo "## 🛡️ VulnFlow Remediation Report" >> $GITHUB_STEP_SUMMARY
+              cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload Security Reports & Audit Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnflow-artifacts
+          path: |
+            .vulnflow/reports/
+            .vulnflow/audit/
+          retention-days: 14
