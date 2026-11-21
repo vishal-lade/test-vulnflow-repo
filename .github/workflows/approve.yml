@@ -89,15 +89,12 @@ jobs:
           echo "Reason:   $REASON"
           echo "=========================================================="
 
-          ARGS="approve --plan-id $PLAN_ID --repo /repo --reviewer $REVIEWER --reason \"$REASON\""
-
+          FLAG=""
           if [ "$ACTION" = "reject" ]; then
-            ARGS="$ARGS --reject"
+            FLAG="--reject"
           elif [ "${{ github.event.inputs.resume }}" = "true" ]; then
-            ARGS="$ARGS --resume"
+            FLAG="--resume"
           fi
-
-          echo "Executing: vulnflow $ARGS"
 
           docker run --rm \
             -v "${{ github.workspace }}:/repo" \
@@ -105,7 +102,12 @@ jobs:
             -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
             -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
             "${{ env.IMAGE }}" \
-            $ARGS
+            approve \
+            --plan-id "$PLAN_ID" \
+            --repo /repo \
+            --reviewer "$REVIEWER" \
+            --reason "$REASON" \
+            $FLAG
 
       - name: Push Remediation Branch to Remote
         if: github.event.inputs.action == 'approve' && github.event.inputs.resume == 'true'
