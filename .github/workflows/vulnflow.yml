@@ -58,7 +58,12 @@ jobs:
         run: |
           # Determine target Docker image
           if [ -n "${{ github.event.inputs.image }}" ]; then
-            IMG="${{ github.event.inputs.image }}"
+            INPUT_IMG="${{ github.event.inputs.image }}"
+            if [[ "$INPUT_IMG" != *"/"* ]]; then
+              IMG="ghcr.io/lade6501/vulnflow:$INPUT_IMG"
+            else
+              IMG="$INPUT_IMG"
+            fi
           elif [ -n "${{ vars.VULNFLOW_IMAGE }}" ]; then
             IMG="${{ vars.VULNFLOW_IMAGE }}"
           else
@@ -139,6 +144,7 @@ jobs:
       - name: Publish Summary to GitHub Actions Job
         if: always()
         run: |
+          sudo chmod -R a+r .vulnflow || true
           if [ -d .vulnflow/reports ]; then
             LATEST_REPORT=$(ls -t .vulnflow/reports/*.md 2>/dev/null | head -n 1)
             if [ -n "$LATEST_REPORT" ] && [ -s "$LATEST_REPORT" ]; then
