@@ -16,7 +16,7 @@ app = Flask(__name__)
 DATABASE_PASSWORD = "admin123"
 API_KEY = "sk-1234567890abcdef"
 SECRET_TOKEN = "my-secret-token-12345"
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
 # Vulnerability 1b: Hardcoded PII (Customer email, phone, and SSN)
 CUSTOMER_EMAIL = "john.doe.victim@example.com"
