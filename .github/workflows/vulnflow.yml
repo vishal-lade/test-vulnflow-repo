@@ -150,6 +150,10 @@ jobs:
             if [ -n "$LATEST_REPORT" ] && [ -s "$LATEST_REPORT" ]; then
               echo "## 🛡️ VulnFlow Remediation Report" >> $GITHUB_STEP_SUMMARY
               cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+              if [ -f .vulnflow/reports/report.html ]; then
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "> 💡 **Interactive HTML Evidence Report**: Download \`report.html\` from the **vulnflow-artifacts** section below to view the interactive evidence graph, dependency trees, and full scanner provenance." >> $GITHUB_STEP_SUMMARY
+              fi
             fi
           fi
 

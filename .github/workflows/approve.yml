@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       plan_id:
-        description: 'Plan ID to authorize or reject (e.g. PLAN-ebaaef6720e2)'
+        description: "Plan ID to authorize or reject, comma-separated IDs, or 'all' for all pending plans (e.g. all, PLAN-SEC-...)"
         required: true
+        default: 'all'
         type: string
       action:
         description: 'Governance decision'
