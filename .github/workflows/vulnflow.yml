@@ -123,6 +123,10 @@ jobs:
             -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
             -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
             -e LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}" \
+            -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            -e SUPABASE_SECRET_KEY="${{ secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -e VULNFLOW_REPOSITORY="${{ github.repository }}" \
+            -e VULNFLOW_ORG_SLUG="${{ secrets.VULNFLOW_ORG_SLUG || github.repository_owner }}" \
             "${{ env.IMAGE }}" \
             scan --repo /repo --output /repo/.vulnflow/reports/report.md --mode "${{ env.MODE }}" ${{ env.FLAGS }}
           
