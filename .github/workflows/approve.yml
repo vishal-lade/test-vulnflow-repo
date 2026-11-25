@@ -21,6 +21,11 @@ on:
         description: Resume remediation after approval
         default: true
         type: boolean
+      vulnflow_ref:
+        description: VulnFlow commit SHA from the scan summary. Blank uses the latest default-branch commit.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -43,9 +48,10 @@ jobs:
       - name: Prepare the VulnFlow CLI
         uses: ./.github/actions/setup-vulnflow
         with:
-          source-ref: ${{ vars.VULNFLOW_REF }}
+          source-ref: ${{ inputs.vulnflow_ref }}
           source-token: ${{ secrets.VULNFLOW_SOURCE_TOKEN || github.token }}
           prepare-sandbox: ${{ inputs.action == 'approve' && inputs.resume }}
+          npm-cache-specs: ${{ vars.VULNFLOW_NPM_CACHE_SPECS }}
 
       - name: Record the decision and resume on the runner
         shell: bash

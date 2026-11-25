@@ -56,10 +56,10 @@ Both workflows install the VulnFlow CLI on the runner and install Trivy through 
 [official setup action](https://github.com/aquasecurity/setup-trivy).
 The scan publishes the report and uploads run artifacts. Exit code 10 means a plan is awaiting approval.
 
-Set `VULNFLOW_REF` under **Settings → Secrets and variables → Actions → Variables** to the full
-commit SHA of the pushed `lade6501/vulnflow` revision that contains the verification changes.
-Use the same SHA for the scan and approval. If that repository is private, set the optional
-`VULNFLOW_SOURCE_TOKEN` secret to a token with read access to it.
+Leave `vulnflow_ref` blank to use the latest commit on the default branch of `lade6501/vulnflow`.
+For a manual run, enter a full commit SHA to pin the engine version. The scan job summary shows
+the resolved SHA. Paste it into `vulnflow_ref` in the approval run to use the same engine version.
+If the source repository is private, set `VULNFLOW_SOURCE_TOKEN` to a token with read access to it.
 
 The sample `VULNFLOW_BUILD_SANDBOX_IMAGE` value is **`vulnflow-npm-sandbox:ci`**.
 The workflows use it by default and build that local tag from `Dockerfile.vulnflow-sandbox`

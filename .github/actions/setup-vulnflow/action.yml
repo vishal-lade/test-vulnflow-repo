@@ -1,15 +1,18 @@
 name: Set up VulnFlow on the runner
-description: Install the pinned CLI and Trivy and prepare the offline npm test image
+description: Install the selected VulnFlow CLI and Trivy and prepare the offline npm test image
 inputs:
   source-ref:
-    description: Published VulnFlow commit SHA
-    required: true
+    description: Optional VulnFlow commit SHA. Blank uses the default branch.
+    default: ''
   source-token:
     description: Token with read access to the VulnFlow repository
     required: true
   prepare-sandbox:
     description: Build the offline npm sandbox for a run that may apply fixes
     default: 'true'
+  npm-cache-specs:
+    description: Space-separated additional npm package versions to cache
+    default: ''
 runs:
   using: composite
   steps:
@@ -18,8 +21,8 @@ runs:
       env:
         SOURCE_REF: ${{ inputs.source-ref }}
       run: |
-        if [[ ! "$SOURCE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
-          echo "::error::Set the VULNFLOW_REF repository variable to the full SHA of a pushed VulnFlow commit."
+        if [[ -n "$SOURCE_REF" && ! "$SOURCE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+          echo "::error::Enter the full SHA of a pushed VulnFlow commit or leave vulnflow_ref blank for the default branch."
           exit 1
         fi
 
@@ -40,8 +43,9 @@ runs:
     - name: Install the VulnFlow CLI
       shell: bash
       run: |
+        source_sha=$(git -C "$GITHUB_WORKSPACE/.vulnflow-engine" rev-parse HEAD)
+        printf 'VulnFlow revision: `%s`\n\n' "$source_sha" >> "$GITHUB_STEP_SUMMARY"
         python -m pip install "$GITHUB_WORKSPACE/.vulnflow-engine"
-        git -C "$GITHUB_WORKSPACE/.vulnflow-engine" rev-parse HEAD
 
     - name: Install Trivy
       uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
@@ -52,7 +56,7 @@ runs:
       if: inputs.prepare-sandbox == 'true'
       shell: bash
       env:
-        NPM_CACHE_SPECS: ${{ vars.VULNFLOW_NPM_CACHE_SPECS }}
+        NPM_CACHE_SPECS: ${{ inputs.npm-cache-specs }}
       run: |
         build_context=$(mktemp -d "$RUNNER_TEMP/vulnflow-npm.XXXXXX")
         cp "$GITHUB_WORKSPACE"/{package.json,package-lock.json,Dockerfile.vulnflow-sandbox} "$build_context/"
