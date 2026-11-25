@@ -2,7 +2,7 @@ name: Set up VulnFlow on the runner
 description: Install the selected VulnFlow CLI and Trivy and prepare the offline npm test image
 inputs:
   source-ref:
-    description: Optional VulnFlow commit SHA. Blank uses the default branch.
+    description: VulnFlow source ref or supported image tag. Blank or latest uses the default branch.
     default: ''
   source-token:
     description: Token with read access to the VulnFlow repository
@@ -16,21 +16,41 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Validate the VulnFlow source revision
+    - name: Resolve the VulnFlow source ref
+      id: resolve-source
       shell: bash
       env:
         SOURCE_REF: ${{ inputs.source-ref }}
       run: |
-        if [[ -n "$SOURCE_REF" && ! "$SOURCE_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
-          echo "::error::Enter the full SHA of a pushed VulnFlow commit or leave vulnflow_ref blank for the default branch."
+        ref="$SOURCE_REF"
+        case "$ref" in
+          ghcr.io/lade6501/vulnflow:*|https://ghcr.io/lade6501/vulnflow:*)
+            ref="${ref#https://}"
+            ref="${ref#ghcr.io/lade6501/vulnflow:}"
+            case "$ref" in
+              latest|main|feat-campaign-prs-and-code-refactoring) ;;
+              *)
+                echo "::error::This image tag has no source-ref mapping. Enter the corresponding Git branch, tag, or SHA."
+                exit 1
+                ;;
+            esac
+            ;;
+        esac
+        case "$ref" in
+          latest) ref="" ;;
+          feat-campaign-prs-and-code-refactoring) ref="feat/campaign-prs-and-code-refactoring" ;;
+        esac
+        if [[ -n "$ref" ]] && { [[ ! "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || ! git check-ref-format --allow-onelevel "$ref"; }; then
+          echo "::error::Enter a valid VulnFlow Git branch, tag, or full commit SHA."
           exit 1
         fi
+        printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
 
     - name: Check out VulnFlow
       uses: actions/checkout@v4
       with:
         repository: lade6501/vulnflow
-        ref: ${{ inputs.source-ref }}
+        ref: ${{ steps.resolve-source.outputs.ref }}
         token: ${{ inputs.source-token }}
         path: .vulnflow-engine
         persist-credentials: false
@@ -48,9 +68,27 @@ runs:
         python -m pip install "$GITHUB_WORKSPACE/.vulnflow-engine"
 
     - name: Install Trivy
-      uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
-      with:
-        version: v0.68.2
+      shell: bash
+      run: |
+        version=0.76.2
+        # SHA-256 digests from the immutable upstream release assets.
+        case "$(uname -m)" in
+          x86_64) arch=64bit; sha256=bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf ;;
+          aarch64|arm64) arch=ARM64; sha256=ab9d51f86e6a5fb936f605faff6b593ac51bc378fff4d3e8b9d58358b9c367c3 ;;
+          *) echo "::error::Unsupported architecture for the Trivy Linux binary"; exit 1 ;;
+        esac
+
+        trivy_dir=$(mktemp -d "$RUNNER_TEMP/vulnflow-trivy.XXXXXX")
+        archive="$trivy_dir/trivy_${version}_Linux-$arch.tar.gz"
+        url="https://github.com/aquasecurity/trivy/releases/download/v$version/${archive##*/}"
+        echo "Downloading Trivy $version ($arch) from GitHub Releases"
+        curl --fail --silent --show-error --location --retry 3 \
+          --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 180 \
+          --output "$archive" "$url"
+        printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check -
+        tar -xzf "$archive" -C "$trivy_dir" trivy
+        "$trivy_dir/trivy" --version
+        printf '%s\n' "$trivy_dir" >> "$GITHUB_PATH"
 
     - name: Build the offline npm sandbox
       if: inputs.prepare-sandbox == 'true'

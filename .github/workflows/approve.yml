@@ -22,7 +22,7 @@ on:
         default: true
         type: boolean
       vulnflow_ref:
-        description: VulnFlow commit SHA from the scan summary. Blank uses the latest default-branch commit.
+        description: VulnFlow branch, tag, SHA, or supported GHCR image reference. Blank or latest uses the default branch.
         required: false
         default: ''
         type: string

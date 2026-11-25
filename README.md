@@ -52,13 +52,19 @@ The primary objective of this repository is to test VulnFlow when **no pre-exist
 ### Pipeline 1: Scan & Remediate ([`.github/workflows/vulnflow.yml`](.github/workflows/vulnflow.yml))
 Push and pull-request events generate reports. Dispatch the workflow manually with `mode: pr`
 to test remediation or with `mode: dry-run` to test without a remote PR.
-Both workflows install the VulnFlow CLI on the runner and install Trivy through the
-[official setup action](https://github.com/aquasecurity/setup-trivy).
+Both workflows install the VulnFlow CLI on the runner and verify the SHA-256 digest of the
+pinned [Trivy release binary](https://github.com/aquasecurity/trivy/releases/tag/v0.76.2)
+before adding it to the runner's PATH.
 The scan publishes the report and uploads run artifacts. Exit code 10 means a plan is awaiting approval.
 
-Leave `vulnflow_ref` blank to use the latest commit on the default branch of `lade6501/vulnflow`.
-For a manual run, enter a full commit SHA to pin the engine version. The scan job summary shows
-the resolved SHA. Paste it into `vulnflow_ref` in the approval run to use the same engine version.
+`vulnflow_ref` accepts a Git branch, tag, or full commit SHA. Leave it blank or enter `latest`
+to use the latest commit on the default branch of `lade6501/vulnflow`.
+The alias `feat-campaign-prs-and-code-refactoring` selects `feat/campaign-prs-and-code-refactoring`.
+You can also use `ghcr.io/lade6501/vulnflow:feat-campaign-prs-and-code-refactoring`,
+`ghcr.io/lade6501/vulnflow:latest`, or `ghcr.io/lade6501/vulnflow:main`. These image names
+select a Git checkout. The workflow installs the CLI from that source on the runner.
+The scan job summary shows the resolved SHA. Paste it into `vulnflow_ref` in the approval
+run to use the same engine version even if the branch has moved.
 If the source repository is private, set `VULNFLOW_SOURCE_TOKEN` to a token with read access to it.
 
 The sample `VULNFLOW_BUILD_SANDBOX_IMAGE` value is **`vulnflow-npm-sandbox:ci`**.

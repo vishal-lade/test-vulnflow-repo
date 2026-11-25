@@ -18,7 +18,7 @@ on:
         type: boolean
         default: true
       vulnflow_ref:
-        description: Optional VulnFlow commit SHA. Blank uses the latest default-branch commit.
+        description: VulnFlow branch, tag, SHA, or supported GHCR image reference. Blank or latest uses the default branch.
         required: false
         default: ''
         type: string
