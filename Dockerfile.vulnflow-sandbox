@@ -1,0 +1,11 @@
+# Prime the npm cache during image creation for network-disabled verification.
+FROM node:22-bookworm-slim
+
+ARG NPM_CACHE_SPECS=""
+WORKDIR /tmp/npm-cache-fixture
+COPY package.json package-lock.json ./
+
+RUN npm ci --ignore-scripts --no-audit --no-fund --cache /opt/npm-cache \
+    && rm -rf node_modules \
+    && set -f \
+    && for spec in $NPM_CACHE_SPECS; do npm cache add --cache /opt/npm-cache -- "$spec" || exit 1; done

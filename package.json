@@ -5,7 +5,7 @@
   "main": "javascript_sast_vulnerabilities.js",
   "scripts": {
     "start": "node javascript_sast_vulnerabilities.js",
-    "test": "node -e \"console.log('Sandbox verification tests passed'); process.exit(0)\""
+    "test": "node --test tests/sandbox-smoke.test.cjs"
   },
   "dependencies": {
     "express": "4.16.0",

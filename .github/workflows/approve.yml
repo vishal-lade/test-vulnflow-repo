@@ -4,132 +4,86 @@ on:
   workflow_dispatch:
     inputs:
       plan_id:
-        description: "Plan ID to authorize or reject, comma-separated IDs, or 'all' for all pending plans (e.g. all, PLAN-SEC-...)"
+        description: Plan ID from the scan report (or comma-separated IDs)
         required: true
-        default: 'all'
         type: string
       action:
-        description: 'Governance decision'
+        description: Governance decision
         required: true
-        default: 'approve'
+        default: approve
         type: choice
-        options:
-          - approve
-          - reject
+        options: [approve, reject]
       reason:
-        description: 'Reviewer rationale / justification'
-        required: false
-        default: 'Approved for deployment by security reviewer'
+        description: Reviewer rationale
+        default: Approved by security reviewer
         type: string
       resume:
-        description: 'Automatically resume workflow and open Pull Request upon approval'
-        required: false
+        description: Resume remediation after approval
         default: true
         type: boolean
-      image:
-        description: 'VulnFlow container image tag (GHCR)'
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
-  packages: read
 
 jobs:
   approve-and-resume:
-    name: Authorize Remediation Plan
     runs-on: ubuntu-latest
-
     env:
-      DEFAULT_IMAGE: "ghcr.io/lade6501/vulnflow:latest"
-
+      VULNFLOW_BUILD_SANDBOX_IMAGE: ${{ vars.VULNFLOW_BUILD_SANDBOX_IMAGE || 'vulnflow-npm-sandbox:ci' }}
+      VULNFLOW_REPORTS_DIR: ${{ github.workspace }}/.vulnflow/reports
+      VULNFLOW_AUDIT_DIR: ${{ github.workspace }}/.vulnflow/audit
     steps:
-      - name: Checkout Code
+      - name: Check out the test repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure Image
-        run: |
-          if [ -n "${{ github.event.inputs.image }}" ]; then
-            INPUT_IMG="${{ github.event.inputs.image }}"
-            if [[ "$INPUT_IMG" != *"/"* ]]; then
-              IMG="ghcr.io/lade6501/vulnflow:$INPUT_IMG"
-            else
-              IMG="$INPUT_IMG"
-            fi
-          elif [ -n "${{ vars.VULNFLOW_IMAGE }}" ]; then
-            IMG="${{ vars.VULNFLOW_IMAGE }}"
-          else
-            IMG="$DEFAULT_IMAGE"
-          fi
-          echo "IMAGE=$IMG" >> $GITHUB_ENV
-
-      - name: Log in to GitHub Container Registry (GHCR)
-        uses: docker/login-action@v3
+      - name: Prepare the VulnFlow CLI
+        uses: ./.github/actions/setup-vulnflow
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+          source-ref: ${{ vars.VULNFLOW_REF }}
+          source-token: ${{ secrets.VULNFLOW_SOURCE_TOKEN || github.token }}
+          prepare-sandbox: ${{ inputs.action == 'approve' && inputs.resume }}
 
-      - name: Pull VulnFlow Container
+      - name: Record the decision and resume on the runner
+        shell: bash
+        env:
+          PLAN_ID: ${{ inputs.plan_id }}
+          DECISION: ${{ inputs.action }}
+          RESUME: ${{ inputs.resume }}
+          REASON: ${{ inputs.reason }}
+          REVIEWER: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          VULNFLOW_LLM_PROVIDER: ${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VULNFLOW_SUPABASE_REQUIRED: 'true'
+          VULNFLOW_REPOSITORY: ${{ github.repository }}
+          VULNFLOW_ORG_SLUG: ${{ secrets.VULNFLOW_ORG_SLUG || github.repository_owner }}
         run: |
-          docker pull "${{ env.IMAGE }}"
-
-      - name: Process Plan Approval / Rejection
-        run: |
-          PLAN_ID="${{ github.event.inputs.plan_id }}"
-          ACTION="${{ github.event.inputs.action }}"
-          REASON="${{ github.event.inputs.reason }}"
-          REVIEWER="${{ github.actor }}"
-
-          echo "=========================================================="
-          echo "Processing VulnFlow Governance Gate"
-          echo "Plan ID:  $PLAN_ID"
-          echo "Action:   $ACTION"
-          echo "Reviewer: $REVIEWER"
-          echo "Reason:   $REASON"
-          echo "=========================================================="
-
-          FLAG=""
-          if [ "$ACTION" = "reject" ]; then
-            FLAG="--reject"
-          elif [ "${{ github.event.inputs.resume }}" = "true" ]; then
-            FLAG="--resume"
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_SECRET_KEY" ]]; then
+            echo "::error::Supabase credentials are required to load the paused run."
+            exit 1
           fi
+          flags=()
+          if [[ "$DECISION" == "reject" ]]; then
+            flags+=(--reject)
+          elif [[ "$RESUME" == "true" ]]; then
+            flags+=(--resume)
+          fi
+          vulnflow approve --plan-id "$PLAN_ID" --repo "$GITHUB_WORKSPACE" \
+            --reviewer "$REVIEWER" --reason "$REASON" "${flags[@]}"
 
-          docker run --rm \
-            -v "${{ github.workspace }}:/repo" \
-            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-            -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
-            -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
-            -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
-            -e SUPABASE_SECRET_KEY="${{ secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -e VULNFLOW_REPOSITORY="${{ github.repository }}" \
-            -e VULNFLOW_ORG_SLUG="${{ secrets.VULNFLOW_ORG_SLUG || github.repository_owner }}" \
-            "${{ env.IMAGE }}" \
-            approve \
-            --plan-id "$PLAN_ID" \
-            --repo /repo \
-            --reviewer "$REVIEWER" \
-            --reason "$REASON" \
-            $FLAG
-
-      - name: Push Remediation Branch to Remote
-        if: github.event.inputs.action == 'approve' && github.event.inputs.resume == 'true'
-        run: |
-          # Push any newly created remediation branch to origin so PR is accessible
-          git push origin --all || true
-
-      - name: Publish Summary
+      - name: Upload resume reports and audit logs
         if: always()
-        run: |
-          echo "### 🛡️ VulnFlow Governance Decision" >> $GITHUB_STEP_SUMMARY
-          echo "- **Plan ID**: \`${{ github.event.inputs.plan_id }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Decision**: \`${{ github.event.inputs.action }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Reviewer**: \`${{ github.actor }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnflow-approval-artifacts
+          if-no-files-found: ignore
+          path: |
+            .vulnflow/reports/
+            .vulnflow/audit/
+          retention-days: 14

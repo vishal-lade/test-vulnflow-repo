@@ -8,160 +8,85 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'VulnFlow execution mode'
-        required: true
-        default: 'pr'
+        description: VulnFlow execution mode
         type: choice
-        options:
-          - pr
-          - report
-          - dry-run
-      auto_approve:
-        description: 'Auto-approve review-tier plans (bypass approval pause)'
-        required: false
-        default: false
-        type: boolean
+        required: true
+        default: pr
+        options: [pr, report, dry-run]
       no_llm:
-        description: 'Force fast offline deterministic planner (bypass remote LLM)'
-        required: false
-        default: false
+        description: Use the deterministic planner
         type: boolean
-      image:
-        description: 'Custom VulnFlow container image tag (GHCR)'
-        required: false
-        default: ''
-        type: string
+        default: true
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
-  packages: read
 
 jobs:
   vulnflow-remediation:
-    name: Scan & Remediate with VulnFlow
     runs-on: ubuntu-latest
-
     env:
-      # Default GHCR container image; can be overridden via workflow_dispatch input or repository variable
-      DEFAULT_IMAGE: "ghcr.io/lade6501/vulnflow:latest"
-
+      VULNFLOW_MODE: ${{ inputs.mode || 'report' }}
+      VULNFLOW_BUILD_SANDBOX_IMAGE: ${{ vars.VULNFLOW_BUILD_SANDBOX_IMAGE || 'vulnflow-npm-sandbox:ci' }}
+      VULNFLOW_REPORTS_DIR: ${{ github.workspace }}/.vulnflow/reports
+      VULNFLOW_AUDIT_DIR: ${{ github.workspace }}/.vulnflow/audit
     steps:
-      - name: Checkout Code
+      - name: Check out the test repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure Image & Flags
-        id: config
-        run: |
-          # Determine target Docker image
-          if [ -n "${{ github.event.inputs.image }}" ]; then
-            INPUT_IMG="${{ github.event.inputs.image }}"
-            if [[ "$INPUT_IMG" != *"/"* ]]; then
-              IMG="ghcr.io/lade6501/vulnflow:$INPUT_IMG"
-            else
-              IMG="$INPUT_IMG"
-            fi
-          elif [ -n "${{ vars.VULNFLOW_IMAGE }}" ]; then
-            IMG="${{ vars.VULNFLOW_IMAGE }}"
-          else
-            IMG="$DEFAULT_IMAGE"
-          fi
-          echo "IMAGE=$IMG" >> $GITHUB_ENV
-          echo "Selected VulnFlow container image: $IMG"
-
-          # Determine mode
-          MODE="${{ github.event.inputs.mode || 'pr' }}"
-          echo "MODE=$MODE" >> $GITHUB_ENV
-
-          # Construct additional CLI flags
-          FLAGS=""
-          if [ "${{ github.event.inputs.auto_approve }}" = "true" ]; then
-            FLAGS="$FLAGS --auto-approve"
-          fi
-          if [ "${{ github.event.inputs.no_llm }}" = "true" ]; then
-            FLAGS="$FLAGS --no-llm"
-          elif [ -z "${{ secrets.NVIDIA_API_KEY }}" ]; then
-            echo "Notice: NVIDIA_API_KEY secret not found; falling back to deterministic planner (--no-llm)"
-            FLAGS="$FLAGS --no-llm"
-          fi
-          echo "FLAGS=$FLAGS" >> $GITHUB_ENV
-
-      - name: Log in to GitHub Container Registry (GHCR)
-        uses: docker/login-action@v3
+      - name: Prepare the VulnFlow CLI
+        uses: ./.github/actions/setup-vulnflow
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+          source-ref: ${{ vars.VULNFLOW_REF }}
+          source-token: ${{ secrets.VULNFLOW_SOURCE_TOKEN || github.token }}
+          prepare-sandbox: ${{ env.VULNFLOW_MODE != 'report' }}
 
-      - name: Pull VulnFlow Container
+      - name: Run the scan on the runner
+        shell: bash
+        env:
+          NO_LLM: ${{ github.event_name != 'workflow_dispatch' || inputs.no_llm }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          VULNFLOW_LLM_PROVIDER: ${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VULNFLOW_REPOSITORY: ${{ github.repository }}
+          VULNFLOW_ORG_SLUG: ${{ secrets.VULNFLOW_ORG_SLUG || github.repository_owner }}
         run: |
-          echo "Pulling container: ${{ env.IMAGE }}"
-          docker pull "${{ env.IMAGE }}"
-
-      - name: Run VulnFlow (Autonomous Scan & Remediation)
-        id: vulnflow_run
-        run: |
-          mkdir -p .vulnflow/reports .vulnflow/audit
-          echo "=========================================================="
-          echo "Executing VulnFlow Container against Repository"
-          echo "Image: ${{ env.IMAGE }}"
-          echo "Mode:  ${{ env.MODE }}"
-          echo "Flags: ${{ env.FLAGS }}"
-          echo "=========================================================="
-
-          set +e
-          docker run -t --rm \
-            -v "${{ github.workspace }}:/repo" \
-            -e PYTHONUNBUFFERED=1 \
-            -e VULNFLOW_REPORTS_DIR="/repo/.vulnflow/reports" \
-            -e VULNFLOW_AUDIT_DIR="/repo/.vulnflow/audit" \
-            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-            -e NVIDIA_API_KEY="${{ secrets.NVIDIA_API_KEY }}" \
-            -e VULNFLOW_LLM_PROVIDER="${{ vars.VULNFLOW_LLM_PROVIDER || 'nvidia' }}" \
-            -e LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}" \
-            -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
-            -e SUPABASE_SECRET_KEY="${{ secrets.SUPABASE_SECRET_KEY || secrets.SUPABASE_KEY || secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -e VULNFLOW_REPOSITORY="${{ github.repository }}" \
-            -e VULNFLOW_ORG_SLUG="${{ secrets.VULNFLOW_ORG_SLUG || github.repository_owner }}" \
-            "${{ env.IMAGE }}" \
-            scan --repo /repo --output /repo/.vulnflow/reports/report.md --mode "${{ env.MODE }}" ${{ env.FLAGS }}
-          
-          EXIT_CODE=$?
-          set -e
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "VulnFlow executed successfully."
-          elif [ $EXIT_CODE -eq 10 ]; then
-            echo "::warning::⚡ Human Security Approval Required (Exit Code 10). One or more plans paused for authorization."
-            echo "::notice::Check the step summary or report below for Plan IDs, then trigger the 'VulnFlow Approval Workflow' to authorize."
-          elif [ $EXIT_CODE -eq 20 ]; then
-            echo "::warning::✖ Policy Safety Gate Blocked Execution (Exit Code 20). Package banned or denied by policies/approved_packages.yaml."
-          else
-            echo "::error::VulnFlow exited with unexpected code: $EXIT_CODE"
-            exit $EXIT_CODE
-          fi
-
-      - name: Publish Summary to GitHub Actions Job
-        if: always()
-        run: |
-          sudo chmod -R a+r .vulnflow || true
-          if [ -d .vulnflow/reports ]; then
-            LATEST_REPORT=$(ls -t .vulnflow/reports/*.md 2>/dev/null | head -n 1)
-            if [ -n "$LATEST_REPORT" ] && [ -s "$LATEST_REPORT" ]; then
-              echo "## 🛡️ VulnFlow Remediation Report" >> $GITHUB_STEP_SUMMARY
-              cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
-              if [ -f .vulnflow/reports/report.html ]; then
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "> 💡 **Interactive HTML Evidence Report**: Download \`report.html\` from the **vulnflow-artifacts** section below to view the interactive evidence graph, dependency trees, and full scanner provenance." >> $GITHUB_STEP_SUMMARY
-              fi
+          mkdir -p "$VULNFLOW_REPORTS_DIR" "$VULNFLOW_AUDIT_DIR"
+          flags=()
+          if [[ "$NO_LLM" == "true" ]]; then flags+=(--no-llm); fi
+          if [[ "$VULNFLOW_MODE" != "report" ]]; then
+            if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_SECRET_KEY" ]]; then
+              echo "::error::Remediation testing requires Supabase so a separate approval job can resume the run."
+              exit 1
             fi
+            export VULNFLOW_SUPABASE_REQUIRED=true
+          fi
+          result=0
+          vulnflow scan --repo "$GITHUB_WORKSPACE" --scanner trivy \
+            --mode "$VULNFLOW_MODE" --output "$VULNFLOW_REPORTS_DIR/report.md" "${flags[@]}" || result=$?
+          case "$result" in
+            0) echo "VulnFlow completed." ;;
+            10) echo "::notice::Approval required. Use the plan ID from the report in VulnFlow Approval Workflow." ;;
+            20) echo "::warning::VulnFlow blocked remediation. See the report." ;;
+            30) echo "::error::Verification failed. See the report."; exit "$result" ;;
+            *) exit "$result" ;;
+          esac
+
+      - name: Publish the scan summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -s "$VULNFLOW_REPORTS_DIR/report.md" ]]; then
+            cat "$VULNFLOW_REPORTS_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Upload Security Reports & Audit Logs
+      - name: Upload reports and audit logs
         if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -50,20 +50,38 @@ The primary objective of this repository is to test VulnFlow when **no pre-exist
 ## 🚀 GitHub Actions CI/CD Pipelines
 
 ### Pipeline 1: Scan & Remediate ([`.github/workflows/vulnflow.yml`](.github/workflows/vulnflow.yml))
-Automatically runs on `push`, `pull_request`, or manual `workflow_dispatch`:
-1. Checks out repository code.
-2. Pulls the latest VulnFlow container from GitHub Container Registry (`ghcr.io/lade6501/vulnflow:latest`).
-3. Executes VulnFlow directly against the repository code without any pre-existing report.
-4. If a review-tier plan is generated (e.g. major bump, unvetted package, secret rotation), execution pauses with `Exit Code: 10` and outputs the Plan ID(s).
-5. Publishes the executive Markdown remediation report to **GitHub Step Summary**.
-6. Uploads audit logs and markdown/JSON reports as build artifacts.
+Push and pull-request events generate reports. Dispatch the workflow manually with `mode: pr`
+to test remediation or with `mode: dry-run` to test without a remote PR.
+Both workflows install the VulnFlow CLI on the runner and install Trivy through the
+[official setup action](https://github.com/aquasecurity/setup-trivy).
+The scan publishes the report and uploads run artifacts. Exit code 10 means a plan is awaiting approval.
+
+Set `VULNFLOW_REF` under **Settings → Secrets and variables → Actions → Variables** to the full
+commit SHA of the pushed `lade6501/vulnflow` revision that contains the verification changes.
+Use the same SHA for the scan and approval. If that repository is private, set the optional
+`VULNFLOW_SOURCE_TOKEN` secret to a token with read access to it.
+
+The sample `VULNFLOW_BUILD_SANDBOX_IMAGE` value is **`vulnflow-npm-sandbox:ci`**.
+The workflows use it by default and build that local tag from `Dockerfile.vulnflow-sandbox`
+when verification may run. The image has Node and the npm cache for the committed lockfile.
+For a proposed version outside that lockfile, set the optional
+`VULNFLOW_NPM_CACHE_SPECS` repository variable to the exact package versions
+from the plan and any additional required dependency versions, separated by spaces.
+
+The broad dummy fixture contains intentional findings. A successful PR test needs a fixture
+whose patched branch rescans cleanly. An approval can succeed while the PR stays blocked.
 
 ### Pipeline 2: Approval Workflow ([`.github/workflows/approve.yml`](.github/workflows/approve.yml))
 Triggered manually under the **Actions** tab to authorize or reject paused plans:
 - **`plan_id`**: The Plan ID reported by VulnFlow (e.g. `PLAN-ebaaef6720e2`).
 - **`action`**: `approve` or `reject`.
 - **`reason`**: Reviewer justification.
-- **`resume`**: `true` to immediately resume execution and open the Pull Request.
+- **`resume`** defaults to `true`. The workflow resumes using the persisted Supabase checkpoint.
+  Set it to `false` to test recording the decision only.
+
+Use the same `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and repository identity in both workflows.
+Generate a fresh plan after moving from the previous `/repo` container mount to the runner.
+The CLI publishes the verified revision when all checks pass.
 
 ---
 
