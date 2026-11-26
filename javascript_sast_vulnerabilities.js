@@ -12,13 +12,13 @@ const fs = require('fs');
 const app = express();
 
 // Vulnerability 1: Hardcoded Credentials
-const DB_PASSWORD = 'SuperSecret123!';
-const API_SECRET = 'my-api-secret-key-12345';
-const AWS_ACCESS_KEY = 'AKIAIOSFODNN7EXAMPLE';
+const DB_PASSWORD = process.env.DB_PASSWORD || "";
+const API_SECRET = process.env.API_SECRET || "";
+const AWS_ACCESS_KEY = process.env.AWS_ACCESS_KEY || "";
 const AWS_SECRET_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
 
 // Vulnerability 1b: Hardcoded PII (Customer SSN)
-const USER_SSN = '000-12-3456';
+const USER_SSN = process.env.USER_SSN || "";
 
 // Vulnerability 2: SQL Injection
 app.get('/users/:id', (req, res) => {
