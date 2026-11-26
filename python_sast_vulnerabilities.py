@@ -13,15 +13,15 @@ from flask import Flask, request
 app = Flask(__name__)
 
 # Vulnerability 1: Hardcoded credentials & Secrets
-DATABASE_PASSWORD = "admin123"
-API_KEY = "sk-1234567890abcdef"
-SECRET_TOKEN = "my-secret-token-12345"
+DATABASE_PASSWORD = os.getenv("DATABASE_PASSWORD", "")
+API_KEY = os.getenv("API_KEY", "")
+SECRET_TOKEN = os.getenv("SECRET_TOKEN", "")
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 
 # Vulnerability 1b: Hardcoded PII (Customer email, phone, and SSN)
 CUSTOMER_EMAIL = "john.doe.victim@example.com"
 CUSTOMER_PHONE = "+1-555-0199"
-CUSTOMER_SSN = "000-45-6789"
+CUSTOMER_SSN = os.getenv("CUSTOMER_SSN", "")
 
 # Vulnerability 2: SQL Injection
 @app.route('/user')
